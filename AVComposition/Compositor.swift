@@ -20,14 +20,41 @@ class Compositor {
     }
     
     func export(completion handler: @escaping (AVAssetExportSession) -> Void) {
+        // Live photoのsizeに対し、transformのtx,tyが正しくないのを補正する
+        // sizeが(1308, 980)に対し、tx, tyには1440, 1080といった値が入ってくる
+//        func fixedTransform(_ transform: CGAffineTransform, size: CGSize) -> CGAffineTransform {
+//            var transform = transform
+//            print("t_in = \(transform)")
+//            if transform.isPortrait {
+//                // portrait
+//                if transform.tx > 0 {
+//                    transform.tx = size.height
+//                }
+//                if transform.ty > 0 {
+//                    transform.ty = size.width
+//                }
+//            } else {
+//                // landscape
+//                if transform.tx > 0 {
+//                    transform.tx = size.width
+//                }
+//                if transform.ty > 0 {
+//                    transform.ty = size.height
+//                }
+//            }
+//            print("t_out = \(transform)")
+//            
+//            return transform
+//        }
         
         let mixerComposition = AVMutableComposition()
         
-        var exportWidth: CGFloat = 0
-        var exportHeight: CGFloat = 0
+        var exportWidth: CGFloat = 1440
+        var exportHeight: CGFloat = 1080
         var videoInstructions: [AVVideoCompositionLayerInstruction] = []
         var audioParameters: [AVAudioMixInputParameters] = []
         
+        var isLandscape = true
         var timeRange: CMTimeRange!
         for asset in self.assets {
             if timeRange == nil {
@@ -42,11 +69,14 @@ class Compositor {
                 withMediaType: AVMediaTypeVideo,
                 preferredTrackID: kCMPersistentTrackID_Invalid
             )
-            
+
             guard let assetVideoTrack = asset.tracks(withMediaType: AVMediaTypeVideo).first else {
                 fatalError()
             }
             print("track size: \(assetVideoTrack.naturalSize)")
+            print("transform: \(assetVideoTrack.preferredTransform)")
+            
+            // deprecate: 出力サイズはソースに依らない
             exportWidth = max(assetVideoTrack.naturalSize.width, exportWidth)
             exportHeight = max(assetVideoTrack.naturalSize.height, exportHeight)
             
@@ -55,10 +85,22 @@ class Compositor {
                 of: assetVideoTrack,
                 at: timeRange.start
             )
+
+            if assetVideoTrack.preferredTransform.isPortrait {
+                isLandscape = false
+            }
             
             let instruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
-            // 動画トラックのorientationを正規化
-            instruction.setTransform(assetVideoTrack.preferredTransform, at: kCMTimeZero)
+//            // 動画トラックのorientationを正規化
+//            instruction.setTransform(assetVideoTrack.preferredTransform, at: kCMTimeZero)
+//            var transform = fixedTransform(
+//                assetVideoTrack.preferredTransform,
+//                size: assetVideoTrack.naturalSize
+//            )
+            // 出力解像度に合わせてスケーリング
+            let s = exportWidth / assetVideoTrack.naturalSize.width
+            let transform = assetVideoTrack.preferredTransform.scaledBy(x: s, y: s)
+            instruction.setTransform(transform, at: kCMTimeZero)
             // 動画トラックをクロスフェードで切替
             let fadeoutStartTime = CMTimeSubtract(timeRange.end, self.transitionDuration)
             instruction.setOpacityRamp(
@@ -102,8 +144,10 @@ class Compositor {
         
         let mainComposition = AVMutableVideoComposition()
         mainComposition.instructions = [mainInstruction]
-        mainComposition.frameDuration = CMTime(value: 1, timescale: 30)
-        mainComposition.renderSize = CGSize(width: exportWidth, height: exportHeight)
+        mainComposition.frameDuration = CMTime(value: 1, timescale: 30)	// 30fps
+        mainComposition.renderSize = isLandscape ?
+            CGSize(width: exportWidth, height: exportHeight) :
+            CGSize(width: exportHeight, height: exportWidth)
     
         let audioMix = AVMutableAudioMix()
         audioMix.inputParameters = audioParameters
@@ -135,5 +179,13 @@ class Compositor {
                 handler(exporter)
             }
         }
+    }
+}
+
+private extension CGAffineTransform {
+    var isPortrait: Bool {
+        return self.a == 0.0 && self.d == 0.0 &&
+            (self.b == 1.0 || self.b == -1.0) &&
+            (self.c == 1.0 || self.c == -1.0)
     }
 }

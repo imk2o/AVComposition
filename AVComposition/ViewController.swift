@@ -66,6 +66,11 @@ extension ViewController: UIImagePickerControllerDelegate, UINavigationControlle
         {
             let asset = AVAsset(url: mediaURL)
             self.compositor.add(asset: asset)
+        } else if
+            let livePhoto = info[UIImagePickerControllerLivePhoto] as? PHLivePhoto,
+            let asset = livePhoto.value(forKey: "videoAsset") as? AVURLAsset
+        {
+            self.compositor.add(asset: asset)
         }
 
         self.dismiss(animated: true) {
@@ -115,8 +120,12 @@ extension ViewController: UIImagePickerControllerDelegate, UINavigationControlle
         let imagePickerController = UIImagePickerController()
         imagePickerController.delegate = self
         imagePickerController.sourceType = sourceType
-        imagePickerController.mediaTypes = [kUTTypeMovie as String]
-        imagePickerController.allowsEditing = true
+        imagePickerController.mediaTypes = [
+            kUTTypeMovie as String,
+            kUTTypeImage as String,
+            kUTTypeLivePhoto as String
+        ]
+//        imagePickerController.allowsEditing = true
         
         self.present(imagePickerController, animated: true, completion: nil)
     }
